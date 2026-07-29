@@ -1,0 +1,12 @@
+# MCU Folders
+*.settings
+*board
+*CMSIS
+*CMSIS_driver
+*component
+*device
+*drivers
+*startup
+*utilities
+*.cproject
+*.project
