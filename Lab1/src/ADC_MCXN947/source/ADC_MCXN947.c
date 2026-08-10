@@ -15,9 +15,6 @@
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "fsl_debug_console.h"
-/* TODO: insert other include files here. */
-
-/* TODO: insert other definitions and declarations here. */
 
 /*
  * @brief   Application entry point.
