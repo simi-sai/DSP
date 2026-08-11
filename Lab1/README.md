@@ -193,8 +193,6 @@ Al generar la interrupción, el CPU ejecuta la rutina de servicio de interrupci�
     </tr>
 </table>
 
-El trigger de conversión es de tipo **software**: cuando CTIMER0 alcanza el valor de match, se genera una interrupción y en la ISR (`CTIMER0_IRQHandler`) se invoca `LPADC_DoSoftwareTrigger(ADC0, 1U)` para disparar el comando de conversión asociado al trigger 0. Así la tasa de muestreo queda determinada por el timer, y cada muestra es leída por el CPU en la ISR del ADC.
-
 ### Modulo Timer (CTIMER0)
 
 El modulo CTIMER0 es un timer de 32 bits que se utilizará para generar el trigger de conversión del ADC. Se configuró desde el PeripheralsTool del ConfigTools con los siguientes parámetros:
@@ -320,7 +318,7 @@ El programa inicializa los módulos (pines, clocks, periféricos y consola de de
 
 #### Buffer Circular q15
 
-El ADC entrega 12 bits *left-justified* en los bits `[14:3]` del word de 16 bits, es decir, ya en formato **Q15** (0x0000 = 0 V, 0x7FF8 ≈ VREF). La muestra se almacena sin procesar en un buffer circular de 512 muestras.
+El ADC entrega 12 bits *left-justified* en los bits `[14:3]` del word de 16 bits, es decir, ya en formato q15 (`0x0000` = `0 V`, `0x7FF8` $\approx$ `VREF`). La muestra se almacena sin procesar en un buffer circular de 512 muestras.
 
 #### Salida al DAC
 
