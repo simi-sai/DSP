@@ -26,7 +26,7 @@ Principalmente se deben configurar los clocks de la placa, ya que casi todos los
     <tr>
         <td>MAIN_clock</td>
         <td>150 MHz</td>
-        <td>FIRC_48M</td>
+        <td>PLL0 (ref. FIRC 48 MHz)</td>
         <td>Clock principal de la placa</td>
     </tr>
     <tr>
@@ -44,7 +44,7 @@ Principalmente se deben configurar los clocks de la placa, ya que casi todos los
     <tr>
         <td>CTIMER0_clock</td>
         <td>150 MHz</td>
-        <td>FIRC_48M</td>
+        <td>PLL0</td>
         <td>Clock del modulo CTIMER0 (Timer)</td>
     </tr>
     <tr>
@@ -87,7 +87,7 @@ El modulo ADC de la placa FRDM-MCXN947 es un conversor de 12 bits con un rango d
     <tr>
         <td> FIFO 0 watermark</td>
         <td> 1</td>
-        <td> Genera una solicitud de DMA cuando hay al menos 1 muestra en la FIFO</td>
+        <td> Genera una interrupción cuando hay al menos 1 muestra en la FIFO</td>
     </tr>
     <tr>
         <td> Enable interrupt vector</td>
@@ -98,6 +98,11 @@ El modulo ADC de la placa FRDM-MCXN947 es un conversor de 12 bits con un rango d
         <td> Interrupt Sources</td>
         <td> FIFO 0 watermark</td>
         <td> Genera una interrupción cuando hay al menos 1 muestra en la FIFO</td>
+    </tr>
+    <tr>
+        <td> Interrupt Priority</td>
+        <td> 0</td>
+        <td> Prioridad de la interrupción del ADC</td>
     </tr>
 </table>
 
@@ -188,7 +193,7 @@ Al generar la interrupción, el CPU ejecuta la rutina de servicio de interrupci�
     </tr>
 </table>
 
-El **hardware trigger** proveniente del **CTIMER0** es el que determina la tasa de muestreo. Cada vez que CTIMER0 alcanza el valor de match configurado, genera un pulso que llega al ADC a través del INPUTMUX e inicia una conversión. De esta forma, la frecuencia de muestreo queda determinada exclusivamente por el timer, sin intervención del CPU.
+El trigger de conversión es de tipo **software**: cuando CTIMER0 alcanza el valor de match, se genera una interrupción y en la ISR (`CTIMER0_IRQHandler`) se invoca `LPADC_DoSoftwareTrigger(ADC0, 1U)` para disparar el comando de conversión asociado al trigger 0. Así la tasa de muestreo queda determinada por el timer, y cada muestra es leída por el CPU en la ISR del ADC.
 
 ### Modulo Timer (CTIMER0)
 
@@ -217,8 +222,8 @@ El modulo CTIMER0 es un timer de 32 bits que se utilizará para generar el trigg
     </tr>
     <tr>
         <td> Match value</td>
-        <td> 80 kHz</td>
-        <td> Valor de match para generar un trigger cada (8 kS/s)</td>
+        <td> 18749 (≈ 8 kHz)</td>
+        <td> 150 MHz / 18749 ≈ 8000.4 Hz — tasa inicial de muestreo</td>
     </tr>
     <tr>
         <td> Enable counter reset on match</td>
@@ -229,6 +234,11 @@ El modulo CTIMER0 es un timer de 32 bits que se utilizará para generar el trigg
         <td> Enable match interrupt request</td>
         <td> Enabled</td>
         <td> Se genera una interrupción al llegar al valor de match</td>
+    </tr>
+    <tr>
+        <td> Interrupt Priority</td>
+        <td> 1</td>
+        <td> Prioridad de la interrupción del timer</td>
     </tr>
 </table>
 
@@ -274,6 +284,112 @@ El modulo DAC de la placa FRDM-MCXN947 es un conversor digital a analógico de 1
     </tr>
 </table>
 
-### Programa Principal (main.c)
+### Programa Principal
 
-El programa principal se encarga de inicializar los modulos de la placa y ejecutar un bucle infinito donde se espera a que el ADC genere una interrupción. Al recibir la interrupción, se ejecuta la rutina de servicio de interrupción (ISR) del ADC, la cual lee la muestra de la FIFO y la almacena en un buffer circular de 512 muestras. A su vez, cada vez que se recibe una nueva muestra, se envía al DAC para su conversión a señal analógica.
+El programa inicializa los módulos (pines, clocks, periféricos y consola de debug) y habilita la interrupción del CTIMER0. Luego ejecuta un bucle infinito que solo actualiza el color del LED RGB cuando cambia el estado (RUN/STOP) o la tasa de muestreo.
+
+#### Handlers de Interrupción
+
+<table align="center">
+    <tr>
+        <th> ISR</th>
+        <th> Evento</th>
+        <th> Acción</th>
+    </tr>
+    <tr>
+        <td> CTIMER0_IRQHandler</td>
+        <td> Match del timer</td>
+        <td> Limpia el flag y dispara la conversión con `LPADC_DoSoftwareTrigger()`</td>
+    </tr>
+    <tr>
+        <td> ADC0_IRQHandler</td>
+        <td> Watermark FIFO0</td>
+        <td> Lee la muestra (`LPADC_GetConvResult`), la guarda en el buffer q15 y la escribe al DAC</td>
+    </tr>
+    <tr>
+        <td> GPIO00_IRQHandler</td>
+        <td> SW3 presionado</td>
+        <td> Inicia/Detiene el muestreo (RUN / STOP)</td>
+    </tr>
+    <tr>
+        <td> GPIO01_IRQHandler</td>
+        <td> SW2 presionado</td>
+        <td> Cambia la tasa de muestreo en forma circular</td>
+    </tr>
+</table>
+
+#### Buffer Circular q15
+
+El ADC entrega 12 bits *left-justified* en los bits `[14:3]` del word de 16 bits, es decir, ya en formato **Q15** (0x0000 = 0 V, 0x7FF8 ≈ VREF). La muestra se almacena sin procesar en un buffer circular de 512 muestras.
+
+#### Salida al DAC
+
+El DAC de 12 bits recibe la misma muestra desplazada 3 bits a la derecha para ajustarla al rango del DAC, como el ADC deja el dato en los bits `[14:3]` y el DAC los espera en `[11:0]`, el shift de 3 reconstruye exactamente el mismo código de 12 bits.
+
+#### Velocidades de muestreo y colores del LED RGB
+
+<table align="center">
+    <tr>
+        <th> Tasa [kS/s]</th>
+        <th> Ticks (150 MHz)</th>
+        <th> Color LED</th>
+    </tr>
+    <tr>
+        <td> 8</td>
+        <td> 18750</td>
+        <td> Verde</td>
+    </tr>
+    <tr>
+        <td> 16</td>
+        <td> 9375</td>
+        <td> Azul</td>
+    </tr>
+    <tr>
+        <td> 22</td>
+        <td> 6818</td>
+        <td> Amarillo (R+G)</td>
+    </tr>
+    <tr>
+        <td> 44</td>
+        <td> 3409</td>
+        <td> Rojo</td>
+    </tr>
+    <tr>
+        <td> 48</td>
+        <td> 3125</td>
+        <td> Violeta (R+B)</td>
+    </tr>
+</table>
+
+#### Botones
+
+Los botones SW2 y SW3 son activos en bajo con resistencia pull-up. La interrupción se configura por flanco descendente.
+
+<table align="center">
+    <tr>
+        <th> Botón</th>
+        <th> Pin</th>
+        <th> ISR</th>
+        <th> Función</th>
+    </tr>
+    <tr>
+        <td> SW3</td>
+        <td> P0_6</td>
+        <td> GPIO00_IRQHandler</td>
+        <td> RUN / STOP</td>
+    </tr>
+    <tr>
+        <td> SW2</td>
+        <td> P0_23</td>
+        <td> GPIO01_IRQHandler</td>
+        <td> Cambio de tasa</td>
+    </tr>
+</table>
+
+#### LEDs RGB
+
+Los LEDs son activos en bajo y las macros `LED_RED_*`, `LED_GREEN_*` y `LED_BLUE_*` manejan la polaridad internamente.
+
+## Screenshots
+
+*(Pendiente — capturas de la placa funcionando)*
