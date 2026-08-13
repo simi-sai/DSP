@@ -12,3 +12,7 @@
 *.project
 *.mex
 *.gitignore
+*/source/semihost_hardfault.c
+
+# VS Code
+.vscode
