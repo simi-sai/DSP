@@ -9,4 +9,4 @@ Laboratorios de Procesamiento Digital de Señales - FCEFyN
 
 ## Laboratorios
 
-- **Lab 1: Analog Digital Converter (ADC)** - [Ver README](./Lab1/README.md)
+- **Lab 1: Muestreo con FRDM-MCXN947** - [Ver README](./Lab1/docs/Informe.pdf)

@@ -1,0 +1,359 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{float}
+
+% Configuración de títulos de párrafos
+\titleformat{\paragraph}[hang]
+{\normalfont\normalsize\bfseries}{\theparagraph}{1em}{}
+\titlespacing*{\paragraph}
+{0pt}{3.25ex plus 1ex minus .2ex}{1em}
+
+\geometry{top=3cm, bottom=3cm, left=2.5cm, right=2.5cm}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    filecolor=magenta,      
+    urlcolor=cyan,
+}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\begin{document}
+\begin{titlepage}
+    \begin{center}
+        \vspace*{1cm}
+
+        \Huge
+        \textbf{Laboratorio N°1}
+
+        \vspace{0.5cm}
+        \LARGE
+        Muestreo con FRDM-MCXN947
+
+        \vspace{1.5cm}
+
+        \vfill
+
+        \Large
+        \textbf{Autor:} Simón Saillen
+
+        \Large
+        \textbf{Profesores:} Gustavo Parlanti, Roberto Rossi, German Molina, Pablo Ferreira
+
+        \vspace{0.5cm}
+
+        \Large
+        \textbf{Procesamiento Digital de Señales}\\
+        \vspace{0.2cm}
+        \textbf{FCEFyN -- UNC}\\
+        \vspace{0.2cm}
+        2026
+
+    \end{center}
+\end{titlepage}
+\newpage
+
+\section{Introducción}
+
+En este laboratorio se implementará un sistema de adquisición de señales
+analógicas utilizando la placa FRDM-MCXN947. Se explorarán diferentes
+velocidades de muestreo y se analizará el efecto de estas velocidades en la
+calidad de la señal adquirida.
+
+\section{Consigna}
+
+Realizar la lectura de una señal analogica a distintas velocidades de muestreo
+en KiloSamples/segundo: \texttt{8 kS/s}, \texttt{16 kS/s}, \texttt{22 kS/s},
+\texttt{44 kS/s} y \texttt{48 kS/s}.
+
+Los cambios de las velocidades de muestreo serán realizados con una de las
+teclas de la placa, en forma de un buffer circular. Cada velocidad de muestreo
+se indicara a traves de un color RGB del LED integrado.
+
+Con otra tecla de la placa se habilitara la adquisicion y paro de muestras
+(\textbf{RUN} / \textbf{STOP}).
+
+Los valores adquiridos seran almacenados en memoria en un buffer circular de
+512 muestras del tipo \texttt{q15} (fraccional de 15 bits) y a su vez seran
+enviados a traves del DAC de 12 bits.
+
+\section{Desarrollo}
+
+El desarrollo se encuentra separado en distintas secciones, cada una de ellas
+explicando la configuracion de los distintos modulos de la placa.
+
+\subsection{Configuración de Clocks}
+
+Principalmente se deben configurar los clocks de la placa, ya que todos los
+modulos de la misma dependen de esta configuracion. Para ello se utilizara
+dentro de ConfigTools el modulo \texttt{CLOCK} del SDK de NXP, el cual permite
+configurar los distintos clocks de la placa.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|c|}
+        \hline
+        \textbf{Clock Component} & \textbf{Frequency} & \textbf{Clock Source} & \textbf{Description}        \\
+        \hline
+        MAIN\_clock              & 150 MHz            & PLL0                  & Clock principal de la placa \\
+        ADC0\_clock              & 48 MHz             & Fast IRC              & Clock del modulo ADC        \\
+        DAC0\_clock              & 48 MHz             & Fast IRC              & Clock del modulo DAC        \\
+        CTIMER0\_clock           & 150 MHz            & PLL0                  & Clock del modulo Timer      \\
+        FLEXXCOM4\_clock         & 12 MHz             & Slow IRC              & Clock del modulo UART       \\
+        \hline
+    \end{tabular}
+    \caption{Configuración de clocks usando ConfigTools}
+\end{table}
+
+El modulo UART se configuro para enviar mensajes de debugging a la PC, por lo
+que se utilizo una pre configuracion con un baudrate de \texttt{115200 bps} y
+un clock de 12 MHz.
+
+\subsection{Modulo Low-Power ADC (LPADC0)}
+
+El modulo ADC de la placa FRDM-MCXN947 es un conversor de 12 bits de baja
+potencia con un rango de voltaje de refencia de 0 a 3.3V. El mismo se configuro
+con los siguientes parametros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}          & \textbf{Valor} & \textbf{Descripcion}                                \\
+        \hline
+        Pre-enable ADC          & Enabled        & Enciende el circuito analogico con anterioridad     \\
+        Autocalibration         & Enabled        & Calibra al iniciar para compensar desviaciones      \\
+        Doze mode               & Enabled        & Permite que funcione en modo de bajo consumo        \\
+        FIFO 0 watermark        & 1              & Genera interrupcion cuando hay 1 muestra en la FIFO \\
+        Enable interrupt vector & Enabled        & Habilita la interrupcion del ADC                    \\
+        Interrupt sources       & FIFO 0         & La fuente de interrupcion es la FIFO 0 watermark    \\
+        Interrupt priority      & 0              & Prioridad de la interrupcion del ADC                \\
+        \hline
+    \end{tabular}
+    \caption{Configuración General del ADC en ConfigTools/Peripherals}
+\end{table}
+
+Al generar la interrupción, el CPU ejecuta la rutina de servicio de
+interrupción (ISR) del ADC, la cual se encarga de leer la muestra de la FIFO y
+almacenarla en el buffer circular de 512 muestras y pasarla tambien al DAC para
+que la muestre en su salida.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}      & \textbf{Valor}                  & \textbf{Descripcion}        \\
+        \hline
+        Command ID          & start\_conversion               & Identificador del comando   \\
+        Command number      & 1                               & Numero de comando           \\
+        Channel sample mode & Single end mode, using A        & Modo de muestreo            \\
+        Channel number      & ADC0\_A0                        & Pin de entrada del ADC      \\
+        Resolution mode     & High resolution (16 bits)       & Resolucion de la conversion \\
+        Loop count          & 0                               & Ejecuta el comando una vez  \\
+        Sample time mode    & 3 ADCK cycles total sample time & Tiempo de muestreo          \\
+        \hline
+    \end{tabular}
+    \caption{Conversion Command del ADC en ConfigTools/Peripherals}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}         & \textbf{Valor}  & \textbf{Descripcion}                  \\
+        \hline
+        Trigger ID             & timer0\_trigger & Identificador del trigger             \\
+        Trigger number         & 0               & Numero de trigger                     \\
+        Trigger command number & 1               & Numero de comando a ejecutar          \\
+        High priority          & Enabled         & Ejecuta el comando con prioridad alta \\
+        Select channel A FIFO  & FIFO 0          & Habilita la FIFO A del ADC            \\
+        Delay value            & 0               & No hay delay entre trigger y comando  \\
+        \hline
+    \end{tabular}
+    \caption{Trigger Command del ADC en ConfigTools/Peripherals}
+\end{table}
+
+\subsubsection{q15: Fraccional de 15 bits}
+
+El formato \texttt{Q15} (o \texttt{Q1.15} o \texttt{S(16,15)}) es una notación
+de punto fijo con signo que usa 1 bit para la parte entera y 15 bits para la
+parte fraccionaria. Este formato permite representar números en el rango de
+$-1$ a $(1 - 2^{-15}) \approx 1$, con una resolución de $2^{-15} \approx
+    0{,}00003051$.
+
+El ADC de la placa es un conversor de 16 bits (en high resolution mode), dicho
+conversor no puede interpretar valores negativos (para solucionar esto,
+generalmente la señal de entrada es movida al rango positivo por hardware
+insertando un offset de voltaje continuo), para poder representar los valores
+de la señal de entrada en el formato q15 (que si contempla valores negativos)
+se debe restar a cada muestra el valor de $2^{15} = 32768$ (quitarle el
+offset). Asi se pasa de un rango de [\texttt{0}, \texttt{0{x}FFFF}] a un rango
+de [\texttt{0{x}8000}, \texttt{0{x}7FFF}], que es el rango de valores que puede
+representar el formato q15.
+
+\subsection{Modulo Timer (CTIMER0)}
+
+El modulo CTIMER0 es un timer de 32 bits que se utiliza para generar el trigger
+de conversión del ADC.\@ Se configuró desde Peripherals en ConfigTools con los
+siguientes parámetros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}          & \textbf{Valor}           & \textbf{Descripcion}               \\
+        \hline
+        Timer mode              & Timer (bus clock source) & Modo de funcionamiento             \\
+        Prescaler value         & 1                        & Frecuencia de clock del timer      \\
+        Match channel           & 0                        & Canal de match del timer           \\
+        Match value             & 18750 ($\approx 8kHz$)   & Valor de match del timer           \\
+        Reset on match          & Enabled                  & Resetea el timer al hacer match    \\
+        Match interrupt request & Enabled                  & Genera interrupcion al hacer match \\
+        Interrupt priority      & 1                        & Prioridad de la interrupcion       \\
+        \hline
+    \end{tabular}
+    \caption{Configuración del Timer en ConfigTools/Peripherals}
+\end{table}
+
+El match value inicial corresponde a la velocidad de muestreo de \texttt{8
+    kS/s}, posteriorment con el uso de los switch este valor es cambiado para
+cumplir con las velocidades de muestreo requeridas.
+
+\subsection{Modulo Low-Power DAC (LPDAC0)}
+
+El modulo DAC de la placa es un conversor digital a analógico de 12 bits con un
+rango de voltaje de salida de 0 a 3.3V. El mismo se configuró desde Peripherals
+en ConfigTools con los siguientes parámetros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}             & \textbf{Valor} & \textbf{Descripcion}                     \\
+        \hline
+        Enable DAC                 & Enabled        & Habilita el modulo DAC                   \\
+        Reference voltage source   & VREF\_INT      & Fuente de voltaje de referencia          \\
+        Opamp as buffer            & Enabled        & Habilita el buffer de salida             \\
+        Enable LPDAC               & Enabled        & Habilita el modo de bajo consumo         \\
+        Set LPDAC level after init & Enabled        & Configura el nivel de salida al encender \\
+        LPDAC level                & 0              & Nivel de salida inicial del DAC (0V)     \\
+        \hline
+    \end{tabular}
+    \caption{Configuración del DAC en ConfigTools/Peripherals}
+\end{table}
+
+\subsection{Programa Principal}
+
+El programa principal inicializa los modulos (pines, clocks, perifericos y
+consola de debugging) y habilita la interrupcion del CTIMER0. Luego ejecuta un
+bucle infinito que actualiza el color de los LEDs RGB dependiendo de la
+velocidad de muestreo seleccionada.
+
+El modo de ejecucion del programa es el siguiente:
+
+\begin{enumerate}
+    \item Se presiona el switch de \texttt{SW3} para habilitar la adquisicion de muestras
+          (\textbf{RUN}).
+    \item Se presiona el switch de \texttt{SW2} para cambiar la velocidad de muestreo.
+          (Por defecto la velocidad de muestreo es de \texttt{8 kS/s}). El cambio de
+          velocidad de muestreo se indica con el color del LED RGB integrado de la placa.
+    \item Las muestras adquiridas son almacenadas en un buffer circular de 512 muestras y
+          enviadas al DAC al mismo tiempo para su visualizacion.
+    \item Se presiona el switch de \texttt{SW1} para detener la adquisicion de muestras
+          (\textbf{STOP}).
+    \item Las muestras almacenadas en el buffer son enviadas al DAC para su visualizacion
+          de forma continua siguiendo la velocidad de muestreo seleccionada.
+\end{enumerate}
+
+\subsubsection{Handlers de Interrupciones y Funciones}
+
+Los handlers de interrupciones y funciones se utilizan para manejar los eventos
+generador por los perifericos y botones de la placa y ejecutar las acciones
+correspondientes.
+
+\begin{enumerate}
+    \item \texttt{CTIMER0\_IRQHandler():} Este handler se ejecuta cada vez que el
+          timer hace match con el valor configurado. En este handler se eligen dos caminos,
+          si la placa se encuentra en modo \textbf{START} se inicia la proxima conversion del ADC,
+          si la placa se encuentra en modo \textbf{STOP} se envia al DAC la proxima muestra del buffer
+          circular para su visualizacion.\@
+    \item \texttt{ADC0\_IRQHandler():} Este handler se ejecuta cada vez que el
+          ADC genera una interrupción por tener una nueva muestra en la FIFO.\@
+          En este handler se lee la muestra de la FIFO, se almacena en el buffer
+          circular y se envia al DAC para su visualizacion.
+    \item \texttt{GPIO00\_IRQHandler():} Este handler se ejecuta cada vez que se presiona
+          el switch de \texttt{SW3}. Habilita o deshabilita la adquisicion de
+          muestras (\textbf{START} / \textbf{RUN}).
+    \item \texttt{GPIO01\_IRQHandler():} Este handler se ejecuta cada vez que se presiona
+          el switch de \texttt{SW2}. En este handler se cambia la velocidad de muestreo
+          siguiendo un buffer circular de velocidades de muestreo.
+    \item \texttt{setLedColors(rate):} Esta funcion se encarga de cambiar el color del LED RGB
+          integrado de la placa dependiendo de la velocidad de muestreo seleccionada.
+\end{enumerate}
+
+La siguiente tabla muestra los colores del LED RGB integrados de la placa
+dependiendo de la velocidad de muestreo seleccionada:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Velocidad de muestreo} & \textbf{Color del LED} & \textbf{Configuracion RGB} \\
+        \hline
+        8 kS/s                         & \color{green}VERDE     & R = 100                    \\
+        16 kS/s                        & \color{blue}AZUL       & B = 100                    \\
+        22 kS/s                        & \color{yellow}AMARILLO & R = 100, G = 100           \\
+        44 kS/s                        & \color{red}ROJO        & G = 100                    \\
+        48 kS/s                        & \color{magenta}MAGENTA & R = 100, B = 100           \\
+        \hline
+    \end{tabular}
+    \caption{Colores del LED RGB integrados de la placa}
+\end{table}
+
+\subsection{Resultados}
+
+TODO
+
+\end{document}
