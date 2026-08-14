@@ -9,4 +9,4 @@ Laboratorios de Procesamiento Digital de Señales - FCEFyN
 
 ## Laboratorios
 
-- **Lab 1: Muestreo con FRDM-MCXN947** - [Ver README](./Lab1/docs/Informe.pdf)
+- **Lab 1: Muestreo con FRDM-MCXN947** - [Ver INFORME](./Lab1/docs/Informe.pdf)
