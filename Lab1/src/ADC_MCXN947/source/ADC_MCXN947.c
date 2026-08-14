@@ -12,31 +12,39 @@
 //          samples [kS/s]   =    8,    16,   22,   44,   48;
 static uint32_t samplings[5] = {18750, 9375, 6818, 3409, 3125};
 static volatile uint8_t sample_config = 0;
-static volatile uint8_t running = 0;
+
+typedef enum {START, STOP} control_state;
+control_state state;
 
 // ADC Buffer Circular q15
-static volatile int16_t q15_buffer[512];
+static volatile q15_t buffer[512];
+static volatile buffer_idx = 0;
 
 /**
  * @brief Timer0 Interruption Handler
  */
 void CTIMER0_IRQHandler(void) {
 	CTIMER_ClearStatusFlags(CTIMER0_PERIPHERAL, kCTIMER_Match0Flag);
-	LPADC_DoSoftwareTrigger(ADC0_PERIPHERAL, 1U);
+
+	if (state == START) {
+		LPADC_DoSoftwareTrigger(ADC0_PERIPHERAL, 1U);
+	} else {
+		uint32_t next_value = ((int32_t)buffer[buffer_idx] + 32768) >> 4;
+		DAC_SetData(DAC0_PERIPHERAL, next_value);
+		buffer_idx = (buffer_idx + 1U) % 512U;
+	}
 }
 
 /**
  * @brief ADC0 Interruption Handler
  */
 void ADC0_IRQHandler(void) {
-	static uint16_t idx = 0;
-
 	lpadc_conv_result_t result;
 
 	if (LPADC_GetConvResult(ADC0_PERIPHERAL, &result, 0)) {
-		q15_buffer[idx] = (int16_t)result.convValue;    // [14:3] = q15
-		DAC_SetData(DAC0_PERIPHERAL, (uint32_t)result.convValue >> 3);  // [14:3] -> [11:0]
-		idx = (idx + 1U) % 512U;  // buffer circular
+		buffer[buffer_idx] = (q15_t)(result.convValue - 32768);	      	  // Transforms from unsigned binary to q15
+		DAC_SetData(DAC0_PERIPHERAL, (uint32_t)(result.convValue >> 4));  // Skips transformation and reduces resolution
+		buffer_idx = (buffer_idx + 1U) % 512U;  // buffer circular
 	}
 }
 
@@ -47,13 +55,7 @@ void ADC0_IRQHandler(void) {
  * this switch STARTS or STOPS the sampling
  */
 void GPIO00_IRQHandler(void) {
-	if (running % 2 == 0) {
-		CTIMER_StartTimer(CTIMER0_PERIPHERAL);	// START
-	} else {
-		CTIMER_StopTimer(CTIMER0_PERIPHERAL);	// STOP
-	}
-
-	running++;
+	state = (state == START) ? STOP : START;     // toggle
 	GPIO_PortClearInterruptFlags(GPIO0, 1U << 6U);
 }
 
@@ -102,20 +104,15 @@ int main(void) {
 
     EnableIRQ(CTIMER0_IRQn);
 
-    uint8_t last_rate = 6, last_run = 2; // random last numbers for first run
+    uint8_t last_rate = 6; // ignore initial value
 
     while (1) {
-        uint8_t run = running % 2U;
         uint8_t rate = sample_config % 5U;
 
-        if ((run != last_run) || (rate != last_rate)) {
-            last_run = run; last_rate = rate;
+        if (rate != last_rate) {
+            last_rate = rate;
 
-            if (run) {
-            	setLedColors(rate);
-            } else {
-            	LED_RED_OFF(); LED_GREEN_OFF(); LED_BLUE_OFF();
-            }
+            setLedColors(rate);
         }
     }
 
