@@ -3,6 +3,7 @@
  * @brief Application entry point.
  */
 #include <stdio.h>
+#include <arm_math_types.h>
 #include "board.h"
 #include "peripherals.h"
 #include "pin_mux.h"
@@ -18,7 +19,7 @@ control_state state;
 
 // ADC Buffer Circular q15
 static volatile q15_t buffer[512];
-static volatile buffer_idx = 0;
+static volatile uint8_t buffer_idx = 0;
 
 /**
  * @brief Timer0 Interruption Handler
@@ -107,7 +108,7 @@ int main(void) {
     uint8_t last_rate = 6; // ignore initial value
 
     while (1) {
-        uint8_t rate = sample_config % 5U;
+        uint8_t rate = sample_config;
 
         if (rate != last_rate) {
             last_rate = rate;
