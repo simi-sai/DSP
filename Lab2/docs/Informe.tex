@@ -113,11 +113,182 @@ Visualizar el resultado utilizando un osciloscopio y comparar los resultados.
 
 \textbf{Requerimientos de los Filtros:}
 
-\begin{enumerate}
-    \item Pasa Bajos: $f_c = 3600 [Hz]$, $A_{stop} = 30 [dB]$
-    \item Pasa Altos: $f_c = 35 [Hz]$, $A_{stop} = 30 [dB]$
-    \item Pasa Banda: $f_{c1} = 35 [Hz]$, $f_{c2} = 3500 [Hz]$, $A_{stop} = 30 [dB]$
-    \item Elimina Banda: $f_r = 50 [Hz]$, $BW = 15 [Hz]$, $A_{stop} = 25 [dB]$
-\end{enumerate}
+\begin{itemize}
+    \item Pasa Bajos: $f_c = 3600 [\text{Hz}]$, $A_{stop} = 30 [\text{dB}]$
+    \item Pasa Altos: $f_c = 35 [\text{Hz}]$, $A_{stop} = 30 [\text{dB}]$
+    \item Pasa Banda: $f_{c1} = 35 [\text{Hz}]$, $f_{c2} = 3500 [\text{Hz}]$, $A_{stop} =
+              30 [\text{dB}]$
+    \item Elimina Banda: $f_r = 50 [\text{Hz}]$, $BW = 15 [\text{Hz}]$, $A_{stop} = 25
+                  [\text{dB}]$
+\end{itemize}
+
+\section{Desarrollo}
+
+La configuracion inicial de los pines, clocks y perifericos necesarios resulta
+igual a la del \textit{Laboratorio 1}, siendo esta:
+
+\subsection{Configuración de Clocks}
+
+Principalmente se deben configurar los clocks de la placa, ya que todos los
+modulos de la misma dependen de esta configuracion. Para ello se utilizara
+dentro de ConfigTools el modulo \texttt{CLOCK} del SDK de NXP, el cual permite
+configurar los distintos clocks de la placa.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|c|}
+        \hline
+        \textbf{Clock Component} & \textbf{Frequency} & \textbf{Clock Source} & \textbf{Description}        \\
+        \hline
+        MAIN\_clock              & 150 MHz            & PLL0                  & Clock principal de la placa \\
+        ADC0\_clock              & 48 MHz             & Fast IRC              & Clock del modulo ADC        \\
+        DAC0\_clock              & 48 MHz             & Fast IRC              & Clock del modulo DAC        \\
+        CTIMER0\_clock           & 150 MHz            & PLL0                  & Clock del modulo Timer      \\
+        FLEXXCOM4\_clock         & 12 MHz             & Slow IRC              & Clock del modulo UART       \\
+        \hline
+    \end{tabular}
+    \caption{Configuración de clocks usando ConfigTools}
+\end{table}
+
+El modulo UART se configuro para enviar mensajes de debugging a la PC, por lo
+que se utilizo una pre configuracion con un baudrate de \texttt{115200 bps} y
+un clock de 12 MHz.
+
+\subsection{Modulo Low-Power ADC (LPADC0)}
+
+El modulo ADC de la placa FRDM-MCXN947 es un conversor de 12 bits de baja
+potencia con un rango de voltaje de refencia de 0 a 3.3V. El mismo se configuro
+con los siguientes parametros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}          & \textbf{Valor} & \textbf{Descripcion}                                \\
+        \hline
+        Pre-enable ADC          & Enabled        & Enciende el circuito analogico con anterioridad     \\
+        Autocalibration         & Enabled        & Calibra al iniciar para compensar desviaciones      \\
+        Doze mode               & Enabled        & Permite que funcione en modo de bajo consumo        \\
+        FIFO 0 watermark        & 1              & Genera interrupcion cuando hay 1 muestra en la FIFO \\
+        Enable interrupt vector & Enabled        & Habilita la interrupcion del ADC                    \\
+        Interrupt sources       & FIFO 0         & La fuente de interrupcion es la FIFO 0 watermark    \\
+        Interrupt priority      & 0              & Prioridad de la interrupcion del ADC                \\
+        \hline
+    \end{tabular}
+    \caption{Configuración General del ADC en ConfigTools/Peripherals}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}      & \textbf{Valor}                  & \textbf{Descripcion}        \\
+        \hline
+        Command ID          & start\_conversion               & Identificador del comando   \\
+        Command number      & 1                               & Numero de comando           \\
+        Channel sample mode & Single end mode, using A        & Modo de muestreo            \\
+        Channel number      & ADC0\_A0                        & Pin de entrada del ADC      \\
+        Resolution mode     & High resolution (16 bits)       & Resolucion de la conversion \\
+        Loop count          & 0                               & Ejecuta el comando una vez  \\
+        Sample time mode    & 3 ADCK cycles total sample time & Tiempo de muestreo          \\
+        \hline
+    \end{tabular}
+    \caption{Conversion Command del ADC en ConfigTools/Peripherals}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}         & \textbf{Valor}  & \textbf{Descripcion}                  \\
+        \hline
+        Trigger ID             & timer0\_trigger & Identificador del trigger             \\
+        Trigger number         & 0               & Numero de trigger                     \\
+        Trigger command number & 1               & Numero de comando a ejecutar          \\
+        High priority          & Enabled         & Ejecuta el comando con prioridad alta \\
+        Select channel A FIFO  & FIFO 0          & Habilita la FIFO A del ADC            \\
+        Delay value            & 0               & No hay delay entre trigger y comando  \\
+        \hline
+    \end{tabular}
+    \caption{Trigger Command del ADC en ConfigTools/Peripherals}
+\end{table}
+
+\subsection{Modulo Timer (CTIMER0)}
+
+El modulo CTIMER0 es un timer de 32 bits que se utiliza para generar el trigger
+de conversión del ADC.\@ Se configuró desde Peripherals en ConfigTools con los
+siguientes parámetros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}          & \textbf{Valor}           & \textbf{Descripcion}               \\
+        \hline
+        Timer mode              & Timer (bus clock source) & Modo de funcionamiento             \\
+        Prescaler value         & 1                        & Frecuencia de clock del timer      \\
+        Match channel           & 0                        & Canal de match del timer           \\
+        Match value             & 18750 ($\approx 8kHz$)   & Valor de match del timer           \\
+        Reset on match          & Enabled                  & Resetea el timer al hacer match    \\
+        Match interrupt request & Enabled                  & Genera interrupcion al hacer match \\
+        Interrupt priority      & 1                        & Prioridad de la interrupcion       \\
+        \hline
+    \end{tabular}
+    \caption{Configuración del Timer en ConfigTools/Peripherals}
+\end{table}
+
+El match value inicial corresponde a la velocidad de muestreo de \texttt{8
+    kS/s}, posteriorment con el uso de los switch este valor es cambiado para
+cumplir con las velocidades de muestreo requeridas.
+
+\subsection{Modulo Low-Power DAC (LPDAC0)}
+
+El modulo DAC de la placa es un conversor digital a analógico de 12 bits con un
+rango de voltaje de salida de 0 a 3.3V. El mismo se configuró desde Peripherals
+en ConfigTools con los siguientes parámetros:
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Campo}             & \textbf{Valor} & \textbf{Descripcion}                     \\
+        \hline
+        Enable DAC                 & Enabled        & Habilita el modulo DAC                   \\
+        Reference voltage source   & VREF\_INT      & Fuente de voltaje de referencia          \\
+        Opamp as buffer            & Enabled        & Habilita el buffer de salida             \\
+        Enable LPDAC               & Enabled        & Habilita el modo de bajo consumo         \\
+        Set LPDAC level after init & Enabled        & Configura el nivel de salida al encender \\
+        LPDAC level                & 0              & Nivel de salida inicial del DAC (0V)     \\
+        \hline
+    \end{tabular}
+    \caption{Configuración del DAC en ConfigTools/Peripherals}
+\end{table}
+
+\subsection{Filtros FIR (Finite Impulse Response)}
+
+La Respuesta en el Tiempo de un Filtro FIR se calcula a partir de la
+ponderación de las muestras presentes y pasadas con los coeficientes del
+filtro. Los coeficientes son la caracterizacion del filtro, variando estos se
+pueden obtener los distintos tipos de filtros (pasa bajos, pasa altos, etc.).
+
+La ecuacion caracteristica de un filtro FIR es la siguiente:
+
+\begin{equation}
+    y[n] = \sum_{k=0}^{N-1} h[k] \cdot x[n-k]
+\end{equation}
+
+Teniendo:
+
+\begin{itemize}
+    \item $y[n]$: Salida del filtro en el instante de tiempo $n$.
+    \item $x[n-k]$: Entrada del filtro en el instante de tiempo $n-k$.
+    \item $h[k]$: Coeficiente del filtro en el instante de tiempo $k$.
+    \item $N$: Cantidad de taps (logitud del filtro).
+\end{itemize}
+
+El calculo de los coeficientes de cada filtro fue hecho en el script
+\texttt{fir\_coefficients.m} usando GNU/Octave.
+
+\section{Resultados}
 
 \end{document}
