@@ -1,10 +1,3 @@
-/*
- * Copyright 2016-2026 NXP
- * All rights reserved.
- *
- * SPDX-License-Identifier: BSD-3-Clause
- */
-
 /**
  * @file    FIR_MCXN947.c
  * @brief   Application entry point.
@@ -15,9 +8,6 @@
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "fsl_debug_console.h"
-/* TODO: insert other include files here. */
-
-/* TODO: insert other definitions and declarations here. */
 
 /*
  * @brief   Application entry point.
