@@ -241,6 +241,17 @@ El match value inicial corresponde a la velocidad de muestreo de \texttt{8
     kS/s}, posteriorment con el uso de los switch este valor es cambiado para
 cumplir con las velocidades de muestreo requeridas.
 
+\subsubsection{Segundo Modulo Timer (CTIMER1)}
+
+Tambien se configuro un segundo timer (CTIMER1) para generar la señal de
+parpadeo del LED RGB, el mismo se configura con un match value dependiendo del
+filtro seleccionado, para que el parpadeo del LED indique el filtro activo.
+
+Su configuracion es similar a la del CTIMER0, con la diferencia de que el match
+value se actualiza segun el filtro seleccionado, y la prioridad de la
+interrupcion es menor que la del CTIMER0, para no interrumpir ni la aplicacion
+de filtro ni la adquisicion de muestras del ADC.\@
+
 \subsection{Modulo Low-Power DAC (LPDAC0)}
 
 El modulo DAC de la placa es un conversor digital a analógico de 12 bits con un
@@ -286,9 +297,219 @@ Teniendo:
     \item $N$: Cantidad de taps (logitud del filtro).
 \end{itemize}
 
-El calculo de los coeficientes de cada filtro fue hecho en el script
-\texttt{fir\_coefficients.m} usando GNU/Octave.
+\subsection{Metodo de Ventana: Kaiser}
+
+El metodo de la ventana es el metodo mas comun para el diseño de filtros FIR
+debido a su simplicidad y facilidad de implementacion. Una ventana consiste en
+un arreglo de valores finitos que conforman los coeficientes que satisfacen los
+requerimientos de diseño del filtro.
+
+La \textit{Ventana de Kaiser} es una aproximacion a la ventana esferoidal
+prolata, para la que se maximiza la relacion de energia del lobulo principal y
+se minimiza la relación de energia del lobulo lateral.
+
+Para lograr una atenuacion relativa del lobulo lateral de $A_{stop}$, el
+parametro $\beta$ de la ventana de Kaiser se calcula con la siguiente ecuacion:
+
+\begin{equation}
+    \beta = \begin{cases}
+        0.1102(A_{stop} - 8.7),                                 & A_{stop} > 50            \\
+        0.5842{(A_{stop} - 21)}^{0.4} + 0.07886(A_{stop} - 21), & 50 \geq A_{stop} \geq 21 \\
+        0,                                                      & A_{stop} < 21
+    \end{cases}
+\end{equation}
+
+Y podemos calcular el orden (o longitud) del filtro con la siguiente ecuacion:
+
+\begin{equation}
+    N = \frac{A_{stop} - 8}{2.285 \cdot 2\pi(BW/f_s)} + 1
+\end{equation}
+
+El calculo de los coeficientes del filtro se realizo usando GNU/Octave,
+utilizando la funcion \texttt{fir1} con la ventana de Kaiser, el script
+utilizado se encuentra en \texttt{fir\_coefficients.m}.
+
+En la siguiente tabla se muestran los parametros de diseño de cada filtro
+FIR:\@
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Filtro}    & \textbf{Beta} & \textbf{Orden (N)} \\
+        \hline
+        Pasa Bajos (LP)    & 2.1166        & 76                 \\
+        Pasa Altos (HP)    & 2.1166        & 151                \\
+        Pasa Banda (BP)    & 2.1166        & 150                \\
+        Rechaza Banda (BS) & 0             & 571                \\
+        \hline
+    \end{tabular}
+\end{table}
+
+Estos coeficientes son los que se cargan en la memoria de la placa para ser
+utilizados por el filtro FIR.\@
+
+Los coeficientes son convertidos a formato Q15 para ser utilizados en la placa,
+esto se hace multiplicando los valores por $2^{15}$ y redondeando al entero mas
+cercano, luego se limita el valor a el rango de -32768 a 32767.
+
+Los filtros diseñados se muestran en las siguientes figura, donde se puede
+observar la respuesta en frecuencia de cada uno de ellos en Magnitud y Fase.
+
+Los filtros pasabanda y rechazabanda tienen similitud con los filtros pasabajos
+y pasaaltos debido a que la frecuencia de corte de estos filtros es muy baja en
+comparacion con la frecuencia de muestreo, haciendo muy poco visible la banda
+de paso y la banda de rechazo.
+
+\begin{figure}[H]
+    \centering
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{../images/FIR_LP.png}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{../images/FIR_HP.png}
+    \end{subfigure}
+    \hfill
+    \caption{Filtros Pasabajo (Izquierda) y Pasaaltos (Derecha)}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{../images/FIR_BP.png}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.49\textwidth}
+        \includegraphics[width=\textwidth]{../images/FIR_BS.png}
+    \end{subfigure}
+    \hfill
+    \caption{Filtros Pasa Banda (Izquierda) y Rechaza Banda (Derecha)}
+\end{figure}
+
+\subsection{Programa Principal}
+
+El programa principal implementa un sistema de filtrado FIR en tiempo real
+utilizando interrupciones y buffers circulares. La arquitectura se basa en tres
+componentes principales:
+
+\subsubsection{Buffers de memoria}
+
+Se utilizan dos buffers circulares de 512 muestras en formato Q15:
+
+\begin{itemize}
+    \item \texttt{input\_buffer}: Almacena las muestras crudas capturadas por el ADC.
+    \item \texttt{output\_buffer}: Almacena las muestras filtradas que se envian al DAC.
+\end{itemize}
+
+\subsubsection{Flujo de datos}
+
+El flujo de datos en el sistema es el siguiente:
+
+\begin{enumerate}
+    \item El Timer0 genera un trigger periodico segun la frecuencia de muestreo
+          seleccionada.
+    \item La interrupcion del Timer0 lee la siguiente muestra de \texttt{input\_buffer},
+          aplica el filtro FIR seleccionado (o bypass si esta deshabilitado), guarda el
+          resultado en \texttt{output\_buffer} y lo envia al DAC.
+    \item Al finalizar, Timer0 dispara al ADC para la siguiente conversion.
+    \item La interrupcion del ADC almacena la muestra cruda en \texttt{input\_buffer}.
+\end{enumerate}
+
+El ADC siempre escribe sobre el buffer de entrada en una posicion arriba de
+donde lee el Timer0, de esta manera se asegura que el Timer0 siempre lea un
+dato valido.
+
+\subsubsection{Filtros FIR con CMSIS DSP}
+
+Los filtros se implementan utilizando la libreria CMSIS DSP, especificamente
+las funciones \texttt{arm\_fir\_init\_q15} y \texttt{arm\_fir\_q15}.
+
+El filtrado se realiza muestra por muestra (\texttt{blockSize = 1}), lo que
+simplifica la implementacion en el contexto de interrupciones pero incrementa
+la sobrecarga por llamada a funcion.
+
+\subsubsection{Control por teclado}
+
+\begin{itemize}
+    \item \textbf{SW3 (GPIO00\_IRQHandler)}: Cicla entre los filtros en orden
+          \texttt{OFF $\rightarrow$ LP $\rightarrow$ HP $\rightarrow$ BP $\rightarrow$
+              BS $\rightarrow$ OFF}. Al cambiar de filtro, se actualiza el valor de
+          match del Timer1 para modificar la velocidad de parpadeo del LED.
+    \item \textbf{SW2 (GPIO01\_IRQHandler)}: Cicla entre las frecuencias de
+          muestreo: \texttt{8 $\rightarrow$ 16 $\rightarrow$ 22 $\rightarrow$ 44
+              $\rightarrow$ 48 kS/s}. Actualiza el valor de match del Timer0 para
+          cambiar el periodo de muestreo.
+\end{itemize}
+
+\subsubsection{Indicacion visual}
+
+Para visualizar la configuracion del sistema, tanto en filtro aplicado como en
+velocidad de muestreo, se utiliza el LED RGB en conjunto con configuraciones de
+parpadeo.
+
+Las siguientes tablas muestran la correspondencia entre color y velocidad de
+muestreo, y entre parpadeo y filtro aplicado.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Velocidad de muestreo} & \textbf{Color del LED} & \textbf{Configuracion RGB} \\
+        \hline
+        8 kS/s                         & \color{green}VERDE     & R = 100                    \\
+        16 kS/s                        & \color{blue}AZUL       & B = 100                    \\
+        22 kS/s                        & \color{yellow}AMARILLO & R = 100, G = 100           \\
+        44 kS/s                        & \color{red}ROJO        & G = 100                    \\
+        48 kS/s                        & \color{magenta}MAGENTA & R = 100, B = 100           \\
+        \hline
+    \end{tabular}
+    \caption{Colores del LED RGB integrados de la placa}
+\end{table}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|c|c|c|}
+        \hline
+        \textbf{Filtro Aplicado} & \textbf{Parpadeo} \\
+        \hline
+        OFF                       & Sin parpadeo      \\
+        LP                        & 1 segundo         \\
+        HP                        & 0.75 segundos     \\
+        BP                        & 0.5 segundos      \\
+        BS                        & 0.25 segundos     \\
+        \hline
+    \end{tabular}
+    \caption{Parpadeo del LED RGB integrados de la placa segun el filtro aplicado}
+\end{table}
 
 \section{Resultados}
+
+\subsection{Capturas de osciloscopio}
+
+% TODO: Agregar capturas del osciloscopio mostrando:
+% - Señal de entrada (sin filtro)
+% - Señal filtrada con cada uno de los 4 filtros
+% - Comparar a distintas frecuencias de muestreo
+
+\subsection{Graficas de Octave}
+
+% TODO: Agregar capturas de las respuestas en frecuencia generadas por Octave
+
+\section{Conclusiones}
+
+% TODO: Completar con conclusiones del laboratorio
+
+\begin{thebibliography}{9}
+    \bibitem{kaiser_window}
+    MathWorks (MATLAB). Kaiser Window.\\
+    \url{https://la.mathworks.com/help/signal/ug/kaiser-window.html}
+
+    \bibitem{mikroe_window}
+    MikroElektronika. Window Functions.\\
+    \url{https://www.mikroe.com/ebooks/digital-filter-design/window-functions}
+\end{thebibliography}
 
 \end{document}
